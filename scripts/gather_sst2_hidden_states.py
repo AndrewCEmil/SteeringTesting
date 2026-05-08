@@ -9,11 +9,13 @@ from typing import Any
 
 import torch
 from datasets import load_dataset
+from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 DATASET_NAME = "stanfordnlp/sst2"
 MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
 LABEL_NAMES = {"0": "negative", "1": "positive"}
+CAPTURE_METHODS = ("output-hidden-states", "forward-hooks")
 
 
 def split_indices(size: int, heldout_fraction: float, seed: int) -> tuple[list[int], list[int]]:
@@ -32,6 +34,71 @@ def last_non_padding_indices(attention_mask: torch.Tensor) -> torch.Tensor:
     return attention_mask.sum(dim=1) - 1
 
 
+def decoder_layers(model: nn.Module) -> nn.ModuleList:
+    layers = getattr(getattr(model, "model", None), "layers", None)
+    if not isinstance(layers, nn.ModuleList):
+        raise ValueError("Expected model.model.layers to be a torch.nn.ModuleList")
+    return layers
+
+
+def layer_hidden_from_output(output: Any) -> torch.Tensor:
+    hidden = output[0] if isinstance(output, tuple) else output
+    if not isinstance(hidden, torch.Tensor):
+        raise ValueError("Expected decoder layer output to contain a tensor hidden state")
+    return hidden
+
+
+def capture_decoder_block_outputs(
+    model: nn.Module,
+    tokens: dict[str, torch.Tensor],
+) -> list[torch.Tensor]:
+    captures: list[torch.Tensor | None] = [None for _ in decoder_layers(model)]
+    handles: list[torch.utils.hooks.RemovableHandle] = []
+
+    def make_hook(index: int) -> Any:
+        def hook(_module: nn.Module, _inputs: tuple[Any, ...], output: Any) -> None:
+            captures[index] = layer_hidden_from_output(output)
+
+        return hook
+
+    for index, layer in enumerate(decoder_layers(model)):
+        handles.append(layer.register_forward_hook(make_hook(index)))
+
+    try:
+        model(**tokens)
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    missing = [index for index, capture in enumerate(captures) if capture is None]
+    if missing:
+        raise RuntimeError(f"Did not capture decoder block outputs for layers: {missing}")
+    return [capture for capture in captures if capture is not None]
+
+
+def collect_hidden_states(
+    model: nn.Module,
+    tokens: dict[str, torch.Tensor],
+    capture_method: str,
+) -> tuple[list[torch.Tensor], str]:
+    if capture_method == "output-hidden-states":
+        outputs = model(**tokens, output_hidden_states=True)
+        hidden_states = outputs.hidden_states
+        if hidden_states is None:
+            raise RuntimeError("Model did not return hidden states")
+        return list(hidden_states), (
+            "output_hidden_states index 0 is embedding output; index N is after decoder block N-1"
+        )
+
+    if capture_method == "forward-hooks":
+        return capture_decoder_block_outputs(model, tokens), (
+            "forward hook index N is raw decoder block N output; for non-final blocks, compare "
+            "to output_hidden_states[N+1]. The final hook output is before final model norm."
+        )
+
+    raise ValueError(f"Unknown capture method: {capture_method}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="outputs/sst2_qwen2_0_5b_hidden_states.pt")
@@ -41,6 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--heldout-fraction", type=float, default=0.2)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--capture-method", choices=CAPTURE_METHODS, default="output-hidden-states")
     return parser.parse_args()
 
 
@@ -87,14 +155,14 @@ def main() -> None:
         tokens = {key: value.to(device) for key, value in tokens.items()}
 
         with torch.no_grad():
-            outputs = model(**tokens, output_hidden_states=True)
+            hidden_states, layer_indexing = collect_hidden_states(
+                model=model,
+                tokens=tokens,
+                capture_method=args.capture_method,
+            )
 
         token_indices = last_non_padding_indices(tokens["attention_mask"])
         batch_positions = torch.arange(len(batch_texts), device=device)
-        hidden_states = outputs.hidden_states
-        if hidden_states is None:
-            raise RuntimeError("Model did not return hidden states")
-
         per_layer = [
             layer[batch_positions, token_indices, :].detach().cpu() for layer in hidden_states
         ]
@@ -117,6 +185,8 @@ def main() -> None:
             "heldout_fraction": args.heldout_fraction,
             "max_length": args.max_length,
             "batch_size": args.batch_size,
+            "capture_method": args.capture_method,
+            "layer_indexing": layer_indexing,
             "label_names": LABEL_NAMES,
         },
     }

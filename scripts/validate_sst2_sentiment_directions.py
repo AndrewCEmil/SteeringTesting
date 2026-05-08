@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+sys.path.append(str(Path(__file__).parent))
+from gather_sst2_hidden_states import CAPTURE_METHODS, collect_hidden_states  # noqa: E402
 
 DATASET_NAME = "stanfordnlp/sst2"
 MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
@@ -111,6 +115,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-length", type=int, default=None)
     parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--capture-method", choices=CAPTURE_METHODS, default=None)
     return parser.parse_args()
 
 
@@ -140,6 +145,9 @@ def main() -> None:
     if not isinstance(gathered_metadata, dict):
         gathered_metadata = {}
     max_length = args.max_length or int(gathered_metadata.get("max_length", 128))
+    capture_method = args.capture_method or str(
+        gathered_metadata.get("capture_method", "output-hidden-states"),
+    )
 
     dataset = load_dataset(DATASET_NAME, split="train")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -173,13 +181,14 @@ def main() -> None:
         tokens = {key: value.to(device) for key, value in tokens.items()}
 
         with torch.no_grad():
-            outputs = model(**tokens, output_hidden_states=True)
+            hidden_states, layer_indexing = collect_hidden_states(
+                model=model,
+                tokens=tokens,
+                capture_method=capture_method,
+            )
 
         token_indices = last_non_padding_indices(tokens["attention_mask"])
         batch_positions = torch.arange(len(batch_texts), device=device)
-        hidden_states = outputs.hidden_states
-        if hidden_states is None:
-            raise RuntimeError("Model did not return hidden states")
 
         per_layer = [layer[batch_positions, token_indices, :].detach() for layer in hidden_states]
         batch_hidden_states = torch.stack(per_layer, dim=1)
@@ -205,6 +214,8 @@ def main() -> None:
             "dataset": DATASET_NAME,
             "source_split": "train",
             "model": MODEL_NAME,
+            "capture_method": capture_method,
+            "layer_indexing": layer_indexing,
             "prediction_rule": "score > 0 predicts positive",
         },
     }
