@@ -14,7 +14,7 @@ from datasets import load_dataset
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from abliteration.sentiment_probes import component_directions, primary_directions
+from mechinterp.sentiment_probes import component_directions, primary_directions
 
 sys.path.append(str(Path(__file__).parent))
 from gather_sst2_hidden_states import (  # noqa: E402

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from abliteration.sentiment_probes import (
+from mechinterp.sentiment_probes import (
     ProbeOptions,
     component_directions,
     fit_probe,

@@ -12,7 +12,7 @@ import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from abliteration.sentiment_probes import predictions_from_probe_scores, score_probe
+from mechinterp.sentiment_probes import predictions_from_probe_scores, score_probe
 
 sys.path.append(str(Path(__file__).parent))
 from gather_sst2_hidden_states import CAPTURE_METHODS, collect_hidden_states  # noqa: E402

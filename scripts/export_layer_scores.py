@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from abliteration.sentiment_probes import score_probe
+from mechinterp.sentiment_probes import score_probe
 
 
 def require_tensor(data: dict[str, Any], key: str) -> torch.Tensor:

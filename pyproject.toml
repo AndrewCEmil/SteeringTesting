@@ -1,5 +1,5 @@
 [project]
-name = "steering-testing"
+name = "mechinterp"
 version = "0.1.0"
 description = "Research tooling for mech-interp-style LLM modification experiments."
 readme = "README.md"
