@@ -1,4 +1,4 @@
 def test_package_imports() -> None:
-    import abliteration
+    import mech-interp
 
-    assert abliteration is not None
+    assert mech-interp is not None

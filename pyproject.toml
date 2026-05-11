@@ -1,7 +1,7 @@
 [project]
-name = "abliteration"
+name = "steering-testing"
 version = "0.1.0"
-description = "Research tooling for abliteration-style LLM modification experiments."
+description = "Research tooling for mech-interp-style LLM modification experiments."
 readme = "README.md"
 authors = [
     { name = "Andrew C Emil", email = "andrewcemil@gmail.com" }

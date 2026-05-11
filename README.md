@@ -1,6 +1,6 @@
-# abliteration
+# Steering testing
 
-Research workspace for abliteration-style LLM modification experiments.
+Research workspace for mech-interp-style LLM modification experiments.
 
 The project is intentionally lightweight at the start: uv manages the Python
 environment, development tooling is included, and heavyweight ML dependencies
@@ -28,6 +28,6 @@ uv run mypy src tests
 - Use `notebooks/` for exploratory analysis and interactive experiments.
 - Use `experiments/` for reproducible experiment runs, configs, and notes.
 - Use `scripts/` for repeatable command-line workflows that are not yet package APIs.
-- Move shared, tested logic into `src/abliteration/` once scripts or notebooks start repeating it.
+- Move shared, tested logic into `src/mech-interp/` once scripts or notebooks start repeating it.
 
 Large model files, checkpoints, and generated outputs should stay out of Git.
