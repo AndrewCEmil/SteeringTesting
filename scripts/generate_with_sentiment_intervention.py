@@ -13,13 +13,14 @@ import torch
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from abliteration.sentiment_probes import component_directions, primary_directions
+
 sys.path.append(str(Path(__file__).parent))
 from gather_sst2_hidden_states import (  # noqa: E402
     MODEL_NAME,
     decoder_layers,
     layer_hidden_from_output,
 )
-from validate_sst2_sentiment_directions import require_tensor  # noqa: E402
 
 DEFAULT_PROMPTS = [
     "Review: The restaurant was",
@@ -103,6 +104,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="outputs/smoke_sentiment_generation_layer14.json")
     parser.add_argument("--hook-block-index", type=int, default=13)
     parser.add_argument("--direction-layer-index", type=int, default=14)
+    parser.add_argument("--component-index", type=int, default=None)
     parser.add_argument("--alphas", type=float, nargs="+", default=[-2.0, 0.0, 2.0])
     parser.add_argument("--max-new-tokens", type=int, default=5)
     parser.add_argument("--num-samples", type=int, default=5)
@@ -125,7 +127,13 @@ def main() -> None:
     directions_data = torch.load(args.directions, map_location="cpu")
     if not isinstance(directions_data, dict):
         raise ValueError("directions file must contain a dictionary")
-    directions = require_tensor(directions_data, "directions")
+    if args.component_index is None:
+        directions = primary_directions(directions_data)
+    else:
+        components = component_directions(directions_data)
+        if args.component_index < 0 or args.component_index >= components.shape[1]:
+            raise ValueError(f"component_index must be between 0 and {components.shape[1] - 1}")
+        directions = components[:, args.component_index, :]
     if args.direction_layer_index < 0 or args.direction_layer_index >= directions.shape[0]:
         raise ValueError(
             f"direction_layer_index must be between 0 and {directions.shape[0] - 1}",
@@ -166,6 +174,7 @@ def main() -> None:
             "directions": args.directions,
             "hook_block_index": args.hook_block_index,
             "direction_layer_index": args.direction_layer_index,
+            "component_index": args.component_index,
             "alphas": [float(alpha) for alpha in args.alphas],
             "max_new_tokens": args.max_new_tokens,
             "num_samples": args.num_samples,

@@ -12,6 +12,8 @@ import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from abliteration.sentiment_probes import predictions_from_probe_scores, score_probe
+
 sys.path.append(str(Path(__file__).parent))
 from gather_sst2_hidden_states import CAPTURE_METHODS, collect_hidden_states  # noqa: E402
 
@@ -37,8 +39,18 @@ def score_hidden_states(hidden_states: torch.Tensor, directions: torch.Tensor) -
     return (hidden_states * directions.unsqueeze(0)).sum(dim=2)
 
 
-def predictions_from_scores(scores: torch.Tensor) -> torch.Tensor:
-    return (scores > 0).to(torch.long)
+def score_hidden_states_with_probe(
+    hidden_states: torch.Tensor,
+    probe_data: dict[str, Any],
+) -> torch.Tensor:
+    return score_probe(hidden_states, probe_data)
+
+
+def predictions_from_scores(
+    scores: torch.Tensor,
+    probe_data: dict[str, Any] | None = None,
+) -> torch.Tensor:
+    return predictions_from_probe_scores(scores, probe_data)
 
 
 def summarize_scores(scores: torch.Tensor, labels: torch.Tensor) -> dict[str, Any]:
@@ -192,14 +204,16 @@ def main() -> None:
 
         per_layer = [layer[batch_positions, token_indices, :].detach() for layer in hidden_states]
         batch_hidden_states = torch.stack(per_layer, dim=1)
-        score_batches.append(score_hidden_states(batch_hidden_states, directions).cpu())
+        score_batches.append(
+            score_hidden_states_with_probe(batch_hidden_states, directions_data).cpu(),
+        )
         labels.extend(batch_labels)
         texts.extend(batch_texts)
         source_indices.extend(batch_indices)
 
     scores = torch.cat(score_batches, dim=0)
     label_tensor = torch.tensor(labels, dtype=torch.long)
-    predictions = predictions_from_scores(scores)
+    predictions = predictions_from_scores(scores, directions_data)
     summary = summarize_scores(scores, label_tensor)
 
     details: dict[str, Any] = {
@@ -216,7 +230,12 @@ def main() -> None:
             "model": MODEL_NAME,
             "capture_method": capture_method,
             "layer_indexing": layer_indexing,
-            "prediction_rule": "score > 0 predicts positive",
+            "prediction_rule": str(
+                directions_data.get("metadata", {}).get(
+                    "prediction_rule",
+                    "score > 0 predicts positive",
+                ),
+            ),
         },
     }
 

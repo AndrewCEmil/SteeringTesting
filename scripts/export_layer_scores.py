@@ -8,6 +8,8 @@ from typing import Any
 
 import torch
 
+from abliteration.sentiment_probes import score_probe
+
 
 def require_tensor(data: dict[str, Any], key: str) -> torch.Tensor:
     value = data.get(key)
@@ -27,6 +29,13 @@ def score_hidden_states(hidden_states: torch.Tensor, directions: torch.Tensor) -
     return (hidden_states * directions.unsqueeze(0)).sum(dim=2)
 
 
+def score_hidden_states_with_probe(
+    hidden_states: torch.Tensor,
+    directions_data: dict[str, Any],
+) -> torch.Tensor:
+    return score_probe(hidden_states, directions_data)
+
+
 def build_layer_scores(
     gathered_data: dict[str, Any],
     directions_data: dict[str, Any],
@@ -34,11 +43,10 @@ def build_layer_scores(
 ) -> dict[str, Any]:
     train_hidden_states = require_tensor(gathered_data, "hidden_states")
     train_labels = require_tensor(gathered_data, "labels")
-    directions = require_tensor(directions_data, "directions")
     test_scores = require_tensor(validation_data, "scores")
     test_labels = require_tensor(validation_data, "labels")
 
-    train_scores = score_hidden_states(train_hidden_states, directions)
+    train_scores = score_hidden_states_with_probe(train_hidden_states, directions_data)
     if train_scores.dim() != 2 or test_scores.dim() != 2:
         raise ValueError("train_scores and test_scores must have shape [num_examples, num_layers]")
     if train_scores.shape[1] != test_scores.shape[1]:
@@ -58,7 +66,10 @@ def build_layer_scores(
             "gathered": gathered_data.get("metadata", {}),
             "directions": directions_data.get("metadata", {}),
             "validation_details": validation_data.get("metadata", {}),
-            "score_rule": "hidden[layer] dot direction[layer]",
+            "score_rule": directions_data.get("metadata", {}).get(
+                "score_rule",
+                "hidden[layer] dot direction[layer]",
+            ),
         },
     }
 

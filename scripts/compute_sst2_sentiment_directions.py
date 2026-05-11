@@ -8,6 +8,8 @@ from typing import Any
 
 import torch
 
+from abliteration.sentiment_probes import ProbeOptions, fit_probe
+
 
 def require_tensor(data: dict[str, Any], key: str) -> torch.Tensor:
     value = data.get(key)
@@ -49,6 +51,22 @@ def compute_directions(
     return normalized_directions, mean_positive, mean_negative, counts, zero_norm_layers
 
 
+def compute_probe(
+    hidden_states: torch.Tensor,
+    labels: torch.Tensor,
+    probe_type: str,
+    options: ProbeOptions,
+    pair_ids: torch.Tensor | None = None,
+) -> dict[str, Any]:
+    return fit_probe(
+        hidden_states=hidden_states,
+        labels=labels,
+        probe_type=probe_type,  # type: ignore[arg-type]
+        options=options,
+        pair_ids=pair_ids,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
@@ -56,6 +74,22 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default="outputs/sst2_qwen2_0_5b_sentiment_directions.pt",
     )
+    parser.add_argument(
+        "--probe-type",
+        choices=[
+            "mean_diff",
+            "logistic_regression",
+            "linear_svm",
+            "whitened_mean_diff",
+            "pca_deltas",
+            "low_rank_subspace",
+        ],
+        default="mean_diff",
+    )
+    parser.add_argument("--rank", type=int, default=1)
+    parser.add_argument("--c", type=float, default=1.0)
+    parser.add_argument("--max-iter", type=int, default=1000)
+    parser.add_argument("--whitening-eps", type=float, default=1e-4)
     return parser.parse_args()
 
 
@@ -67,22 +101,24 @@ def main() -> None:
 
     hidden_states = require_tensor(data, "hidden_states")
     labels = require_tensor(data, "labels")
-    directions, mean_positive, mean_negative, counts, zero_norm_layers = compute_directions(
-        hidden_states,
-        labels,
+    pair_ids_value = data.get("pair_ids")
+    pair_ids = pair_ids_value if isinstance(pair_ids_value, torch.Tensor) else None
+    output = compute_probe(
+        hidden_states=hidden_states,
+        labels=labels,
+        probe_type=args.probe_type,
+        options=ProbeOptions(
+            rank=args.rank,
+            c=args.c,
+            max_iter=args.max_iter,
+            whitening_eps=args.whitening_eps,
+        ),
+        pair_ids=pair_ids,
     )
-
-    output: dict[str, Any] = {
-        "directions": directions,
-        "mean_positive": mean_positive,
-        "mean_negative": mean_negative,
-        "counts": counts,
-        "metadata": {
-            "source": data.get("metadata", {}),
-            "analysis": "mean_positive_minus_mean_negative",
-            "normalized": True,
-            "zero_norm_layers": zero_norm_layers,
-        },
+    output["metadata"] = {
+        "source": data.get("metadata", {}),
+        "probe_type": args.probe_type,
+        **output.get("metadata", {}),
     }
 
     output_path = Path(args.output)

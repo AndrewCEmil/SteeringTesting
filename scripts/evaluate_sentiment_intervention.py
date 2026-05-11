@@ -14,6 +14,8 @@ from datasets import load_dataset
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from abliteration.sentiment_probes import component_directions, primary_directions
+
 sys.path.append(str(Path(__file__).parent))
 from gather_sst2_hidden_states import (  # noqa: E402
     DATASET_NAME,
@@ -22,7 +24,6 @@ from gather_sst2_hidden_states import (  # noqa: E402
     last_non_padding_indices,
     layer_hidden_from_output,
 )
-from validate_sst2_sentiment_directions import require_tensor  # noqa: E402
 
 
 def predictions_from_scores(scores: torch.Tensor) -> torch.Tensor:
@@ -137,31 +138,42 @@ def build_example_details(
 ) -> list[dict[str, Any]]:
     baseline_predictions = predictions_from_scores(baseline_scores)
     intervened_predictions = predictions_from_scores(intervened_scores)
-    return [
-        {
-            "source_index": int(source_index),
-            "label": int(label),
-            "text": text,
-            "alpha": float(alpha),
-            "baseline_score": float(baseline_score),
-            "intervened_score": float(intervened_score),
-            "score_delta": float(intervened_score - baseline_score),
-            "baseline_prediction": int(baseline_prediction),
-            "intervened_prediction": int(intervened_prediction),
-            "flipped": bool(baseline_prediction != intervened_prediction),
-        }
-        for source_index, label, text, baseline_score, intervened_score, baseline_prediction,
-        intervened_prediction in zip(
-            source_indices,
-            labels.tolist(),
-            texts,
-            baseline_scores.tolist(),
-            intervened_scores.tolist(),
-            baseline_predictions.tolist(),
-            intervened_predictions.tolist(),
-            strict=True,
+    rows = zip(
+        source_indices,
+        labels.tolist(),
+        texts,
+        baseline_scores.tolist(),
+        intervened_scores.tolist(),
+        baseline_predictions.tolist(),
+        intervened_predictions.tolist(),
+        strict=True,
+    )
+    details = []
+    for row in rows:
+        (
+            source_index,
+            label,
+            text,
+            baseline_score,
+            intervened_score,
+            baseline_prediction,
+            intervened_prediction,
+        ) = row
+        details.append(
+            {
+                "source_index": int(source_index),
+                "label": int(label),
+                "text": text,
+                "alpha": float(alpha),
+                "baseline_score": float(baseline_score),
+                "intervened_score": float(intervened_score),
+                "score_delta": float(intervened_score - baseline_score),
+                "baseline_prediction": int(baseline_prediction),
+                "intervened_prediction": int(intervened_prediction),
+                "flipped": bool(baseline_prediction != intervened_prediction),
+            },
         )
-    ]
+    return details
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,6 +183,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="outputs/smoke_sentiment_intervention_layer14.json")
     parser.add_argument("--hook-block-index", type=int, default=13)
     parser.add_argument("--direction-layer-index", type=int, default=14)
+    parser.add_argument("--component-index", type=int, default=None)
     parser.add_argument("--alphas", type=float, nargs="+", default=[-2.0, -1.0, 0.0, 1.0, 2.0])
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--max-length", type=int, default=None)
@@ -187,7 +200,13 @@ def main() -> None:
     directions_data = torch.load(args.directions, map_location="cpu")
     if not isinstance(directions_data, dict):
         raise ValueError("directions file must contain a dictionary")
-    directions = require_tensor(directions_data, "directions")
+    if args.component_index is None:
+        directions = primary_directions(directions_data)
+    else:
+        components = component_directions(directions_data)
+        if args.component_index < 0 or args.component_index >= components.shape[1]:
+            raise ValueError(f"component_index must be between 0 and {components.shape[1] - 1}")
+        directions = components[:, args.component_index, :]
     if args.direction_layer_index < 0 or args.direction_layer_index >= directions.shape[0]:
         raise ValueError(
             f"direction_layer_index must be between 0 and {directions.shape[0] - 1}",
@@ -300,6 +319,7 @@ def main() -> None:
             "max_length": max_length,
             "hook_block_index": args.hook_block_index,
             "direction_layer_index": args.direction_layer_index,
+            "component_index": args.component_index,
             "alphas": [float(alpha) for alpha in args.alphas],
             "baseline_alpha": float(baseline_alpha),
             "layer_indexing": (
