@@ -67,6 +67,22 @@ def test_whitened_mean_diff_returns_normalized_directions() -> None:
     assert torch.allclose(artifact["directions"].norm(dim=1), torch.ones(2))
 
 
+def test_whitened_mean_diff_accepts_bfloat16_hidden_states() -> None:
+    hidden_states, labels = separable_hidden_states()
+    hidden_states = hidden_states.to(torch.bfloat16)
+
+    artifact = fit_probe(
+        hidden_states,
+        labels,
+        "whitened_mean_diff",
+        ProbeOptions(whitening_eps=1e-3),
+    )
+
+    assert artifact["directions"].dtype == torch.bfloat16
+    assert artifact["raw_directions"].dtype == torch.bfloat16
+    assert torch.isfinite(artifact["raw_directions"].float()).all()
+
+
 def test_pca_deltas_requires_pair_ids() -> None:
     hidden_states, labels = separable_hidden_states()
 

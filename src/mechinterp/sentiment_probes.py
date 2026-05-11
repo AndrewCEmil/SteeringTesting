@@ -207,9 +207,10 @@ def fit_whitened_mean_diff(
         x = centered[:, layer, :].float()
         cov = x.T @ x / max(x.shape[0] - 1, 1)
         eye = torch.eye(cov.shape[0], dtype=cov.dtype, device=cov.device)
+        mean_delta = (mean_positive[layer] - mean_negative[layer]).to(cov.dtype)
         solved = torch.linalg.solve(
             cov + options.whitening_eps * eye,
-            mean_positive[layer] - mean_negative[layer],
+            mean_delta,
         )
         directions.append(solved.to(hidden_states.dtype))
     raw_directions = torch.stack(directions, dim=0)
